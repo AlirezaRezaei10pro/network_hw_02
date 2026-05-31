@@ -1,0 +1,199 @@
+SSH Keys Guide - راهنمای کلیدهای SSH
+======================================
+تاریخ: تمرین ششم - شبکه
+======================================
+
+## ۱. تولید SSH Key Pair (RSA 2048-bit)
+
+دستور تولید کلید:
+------------------
+    ssh-keygen -t rsa -b 2048 -C "your_email@example.com" -f ~/.ssh/id_rsa
+
+پارامترها:
+    -t rsa        : نوع الگوریتم (RSA)
+    -b 2048       : طول کلید به بیت (2048 بیت)
+    -C "comment"  : یک comment توصیفی (معمولاً ایمیل)
+    -f ~/.ssh/id_rsa : مسیر ذخیره فایل
+
+خروجی دستور بالا دو فایل است:
+    ~/.ssh/id_rsa       → کلید خصوصی (Private Key) - هرگز به کسی ندهید!
+    ~/.ssh/id_rsa.pub   → کلید عمومی (Public Key) - می‌توانید به اشتراک بگذارید
+
+مثال خروجی:
+    Generating public/private rsa key pair.
+    Enter passphrase (empty for no passphrase): [وارد کردن passphrase اختیاری]
+    Your identification has been saved in /home/user/.ssh/id_rsa
+    Your public key has been saved in /home/user/.ssh/id_rsa.pub
+    The key fingerprint is:
+    SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx your_email@example.com
+
+
+## ۲. کلید Public در فرمت مناسب
+
+محتوای فایل id_rsa.pub (OpenSSH Format):
+-----------------------------------------
+    ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB....(base64).... your_email@example.com
+
+نمایش کلید عمومی:
+    cat ~/.ssh/id_rsa.pub
+
+کپی به clipboard:
+    # Linux
+    cat ~/.ssh/id_rsa.pub | xclip -selection clipboard
+    
+    # macOS
+    cat ~/.ssh/id_rsa.pub | pbcopy
+
+فرمت‌های مختلف Public Key:
+---------------------------
+    # OpenSSH format (پیش‌فرض - برای اکثر موارد)
+    ssh-rsa AAAA...
+
+    # PEM format (برای برخی سرویس‌ها)
+    ssh-keygen -e -m PEM -f ~/.ssh/id_rsa.pub
+
+    # PKCS8 format
+    ssh-keygen -e -m PKCS8 -f ~/.ssh/id_rsa.pub
+
+اضافه کردن به سرور (authorized_keys):
+    # روش اول - با ssh-copy-id
+    ssh-copy-id user@server.example.com
+    
+    # روش دوم - دستی
+    cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+    chmod 600 ~/.ssh/authorized_keys
+
+تنظیم permissions صحیح:
+    chmod 700 ~/.ssh
+    chmod 600 ~/.ssh/id_rsa
+    chmod 644 ~/.ssh/id_rsa.pub
+    chmod 600 ~/.ssh/authorized_keys
+
+
+## ۳. نحوه استفاده برای Passwordless Authentication
+
+چگونه کار می‌کند:
+------------------
+۱. شما یک جفت کلید (Public + Private) تولید می‌کنید
+۲. کلید Public را روی سرور در فایل ~/.ssh/authorized_keys قرار می‌دهید
+۳. کلید Private روی ماشین شما می‌ماند (هرگز منتقل نشود)
+۴. هنگام اتصال، SSH یک "challenge" رمزنگاری شده با کلید Public ارسال می‌کند
+۵. فقط کسی که کلید Private را دارد می‌تواند آن را decrypt کند
+۶. اگر decrypt موفق بود = احراز هویت تأیید شده
+
+فرایند به صورت دیاگرام:
+    [Client]                           [Server]
+       |                                   |
+       |-- SSH Connection Request -------->|
+       |                                   |
+       |<-- Challenge (encrypted with      |
+       |    your Public Key) --------------|
+       |                                   |
+       | [decrypt with Private Key]        |
+       |                                   |
+       |-- Response ------------------------>|
+       |                                   |
+       |<-- Access Granted! ---------------|
+
+مزایای Passwordless Auth:
+    ✔ رمز عبور در شبکه منتقل نمی‌شود
+    ✔ در برابر Brute Force ایمن است
+    ✔ برای automation و script مناسب است
+    ✔ سریع‌تر از وارد کردن رمز عبور
+
+استفاده از ssh-agent (برای passphrase):
+    # شروع agent
+    eval "$(ssh-agent -s)"
+    
+    # اضافه کردن کلید
+    ssh-add ~/.ssh/id_rsa
+    
+    # لیست کلیدهای load شده
+    ssh-add -l
+
+
+## ۴. فایل ~/.ssh/config
+
+این فایل به شما اجازه می‌دهد تنظیمات ارتباط SSH را ذخیره کنید تا نیاز به تایپ مجدد نداشته باشید.
+
+ساخت/ویرایش فایل:
+    nano ~/.ssh/config
+    # یا
+    vim ~/.ssh/config
+
+محتوای نمونه ~/.ssh/config:
+-----------------------------
+    # تنظیمات پیش‌فرض برای همه اتصال‌ها
+    Host *
+        ServerAliveInterval 60
+        ServerAliveCountMax 3
+        AddKeysToAgent yes
+        IdentityFile ~/.ssh/id_rsa
+
+    # سرور اصلی production
+    Host prod
+        HostName 192.168.1.100
+        User deploy
+        Port 22
+        IdentityFile ~/.ssh/id_rsa_prod
+
+    # سرور توسعه
+    Host dev
+        HostName dev.example.com
+        User developer
+        Port 2222
+        IdentityFile ~/.ssh/id_rsa
+
+    # سرور با jump host
+    Host internal-server
+        HostName 10.0.0.5
+        User admin
+        ProxyJump bastion.example.com
+
+    # GitHub
+    Host github.com
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/id_rsa_github
+
+استفاده با config:
+    # به جای: ssh -i ~/.ssh/id_rsa -p 2222 developer@dev.example.com
+    # فقط بنویسید:
+    ssh dev
+
+    # به جای: scp -P 2222 -i ~/.ssh/id_rsa file.txt developer@dev.example.com:/home/developer/
+    scp file.txt dev:/home/developer/
+
+توضیح پارامترهای مهم Config:
+    Host          : نام مستعار (alias) برای این اتصال
+    HostName      : آدرس واقعی سرور (IP یا domain)
+    User          : نام کاربری
+    Port          : پورت SSH (پیش‌فرض: 22)
+    IdentityFile  : مسیر کلید Private
+    ProxyJump     : اتصال از طریق یک سرور میانی (Jump Host)
+    ServerAliveInterval : ارسال ping هر N ثانیه برای جلوگیری از timeout
+
+
+## خلاصه دستورات مهم
+
+    # تولید کلید
+    ssh-keygen -t rsa -b 2048 -C "email@example.com"
+    
+    # کپی کلید عمومی به سرور
+    ssh-copy-id user@server
+    
+    # اتصال SSH
+    ssh user@server
+    
+    # اتصال با کلید خاص
+    ssh -i ~/.ssh/id_rsa user@server
+    
+    # مشاهده کلیدهای موجود
+    ls -la ~/.ssh/
+    
+    # بررسی fingerprint کلید
+    ssh-keygen -lf ~/.ssh/id_rsa.pub
+
+======================================
+پایان راهنما
+======================================
